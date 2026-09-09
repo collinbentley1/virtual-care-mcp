@@ -191,12 +191,16 @@ store.close();
 		const child = Bun.spawn([process.execPath, "-e", childSource], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
 		child.stdin.write(`${JSON.stringify({ path, role, credential: initial.credential })}\n`);
 		const reader = child.stdout.getReader();
+		const stderr = new Response(child.stderr).text();
 		const decoder = new TextDecoder();
 		let buffered = "";
 		const line = async () => {
 			while (!buffered.includes("\n")) {
 				const chunk = await reader.read();
-				if (chunk.done) throw new Error("The child exited before its synchronization message.");
+				if (chunk.done) {
+					const detail = (await stderr).trim();
+					throw new Error(`The child exited before its synchronization message.${detail ? `\n${detail}` : ""}`);
+				}
 				buffered += decoder.decode(chunk.value, { stream: true });
 			}
 			const newline = buffered.indexOf("\n");
