@@ -1,8 +1,9 @@
 # Platform adoption
 
-Source contract checked on 2026-09-09. Platform registration and Bun 1.4.2 are
-combined in [PR #79](https://github.com/collinbentley1/platform/pull/79).
-The combined source requires independent review and fresh CI before merge.
+Source contract checked on 2026-09-09. Platform registration and Bun 1.4.2
+merged through [PR #79](https://github.com/collinbentley1/platform/pull/79) as
+[`d0d1a3af340acb712caa5a1c83283a0387c87571`](https://github.com/collinbentley1/platform/commit/d0d1a3af340acb712caa5a1c83283a0387c87571).
+The reviewed source head passed every required CI job before the squash merge.
 
 ## Registered identities
 
@@ -27,24 +28,25 @@ deployment. The source contract requires no existing domain change.
 
 ## Immutable platform source
 
-The verified upstream platform main was
+The predecessor platform main was
 [`d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672`](https://github.com/collinbentley1/platform/commit/d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672).
 Its Grype database expired on September 8. The registration branch incorporates
 the original maintenance commit from
 [PR #77](https://github.com/collinbentley1/platform/pull/77),
 `5e4802bc5b373c0a5061b3c89f617ff4600b8218`, whose database was built September 8
 at 06:30:10 UTC. That snapshot also expires after 48 hours; recheck it immediately
-before image verification. Incorporating the commit does not claim a main merge
-or a successful deployment.
+before image verification. The maintenance commit is now incorporated in the
+merged platform source. This does not claim a successful application deployment.
 
-The final reviewed registration commit must replace the provisional platform
-pin in every new-app workflow and Terraform module before Actions are enabled.
+The merged platform commit replaces the provisional platform pin in every
+new-app workflow and Terraform module. Actions remain disabled until the
+credentialless delivery gates and enrollment are complete.
 Existing consumer pins and the four-project protected recovery group are outside
 this enrollment. Their existing production-apply freeze remains in place.
 
-The combined registration and Bun source candidate is
+The reviewed combined registration and Bun source head was
 [`31626209e4ff51bf200465f11559fda1fb1b1c9e`](https://github.com/collinbentley1/platform/commit/31626209e4ff51bf200465f11559fda1fb1b1c9e),
-published in [PR #79](https://github.com/collinbentley1/platform/pull/79).
+which produced the squash commit named above.
 The enrollment root requires explicit confirmation of independent storage
 access and orders the preview auditor grant after its service account exists.
 Each permitted project scope checks every registered preview identity, including
@@ -88,8 +90,8 @@ verify:ci = bun run format:check && bun run lint && bun run typecheck && bun run
 
 The combined source requires Bun `1.4.2`, executable revision
 `744846f844374847c902b5e7fd59b4342a51ef99`. The canonical container rejects a
-different version or revision. The final merged platform contract must determine
-every runtime and workflow pin before activation.
+different version or revision. The merged platform contract determines every
+runtime and workflow pin before activation.
 TypeScript is `7.0.2`, with wrapper and native lock entries matched to the
 platform's reviewed lockfile.
 

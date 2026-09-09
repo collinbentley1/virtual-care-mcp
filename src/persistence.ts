@@ -56,7 +56,8 @@ export async function createSqliteStore(path: string): Promise<VisitStore> {
 			catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
 		}
 	}
-	db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+	db.exec("PRAGMA busy_timeout=5000");
+	db.exec("PRAGMA journal_mode=WAL");
 	db.exec("CREATE TABLE IF NOT EXISTS visits (id TEXT PRIMARY KEY, payload TEXT NOT NULL, expires_at TEXT NOT NULL)");
 	db.exec("CREATE INDEX IF NOT EXISTS visit_expiry ON visits(expires_at)");
 	const find = db.query("SELECT payload FROM visits WHERE id = ?");
