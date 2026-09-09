@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Independent MCP Apps host harness</title>
+<style>body{margin:20px;font:16px system-ui;background:#f4f6f8;color:#172328}h1{font-size:22px}button{font:inherit;margin:4px;padding:10px}iframe{width:100%;height:850px;border:1px solid #9aa9b0;background:var(--host-background,white)}pre{white-space:pre-wrap;background:white;padding:12px}#events{font-family:monospace;max-height:230px;overflow:auto}</style></head>
+<body><h1>Independent MCP Apps host harness</h1><p>This local test host uses the standard AppBridge. It is not ChatGPT or Claude. All visits are synthetic. Camera and microphone permissions are denied.</p>
+<p><label>Host theme <select id="host-theme"><option value="light">Light · Arial · 17px</option><option value="dark">Dark · Verdana · 19px</option></select></label>. Changing this control sends standard host context and style variables to the app. The outer iframe uses the matching host background.</p>
+<p><label>Scenario <select id="scenario"><option value="rural-adult">Rural adult</option><option value="older-adult">Older adult</option><option value="uninsured-adult">Uninsured adult</option></select></label>. <label><input id="omit-null" type="checkbox">Omit null object fields from host results</label>. This fixture reproduces the observed host adapter serialization, including nested visit data.</p>
+<p><label><input id="promote-tool-errors" type="checkbox">Promote tool errors to protocol errors</label>. This fixture discards structured tool-error results before the app receives them.</p>
+<p><label><input id="drop-next-mutation" type="checkbox">Drop next mutation response</label>. The next visit or payment mutation executes, then its response is dropped once. <button id="change-payment-assistance" disabled>Change payment to assistance without notifying app</button></p>
+<div><button id="start">Start synthetic visit</button><button id="update" disabled>Deliver host update</button><button id="delayed-update" disabled>Deliver host update after 3 seconds</button><button id="teardown" disabled>Teardown app</button><button id="reconnect" disabled>Reconnect app</button></div>
+<p><label><input id="deny-download" type="checkbox">Deny host download requests</label>. Accepted requests are validated and acknowledged by this harness; no file is saved.</p>
+<pre id="status" role="status">Loading the host bridge…</pre><details><summary>Safe build and protocol evidence</summary><pre id="build"></pre><ol id="events"></ol></details><div id="mount"></div>
+<script type="module" src="/host.js"></script></body></html>

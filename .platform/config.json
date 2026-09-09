@@ -1,0 +1,8 @@
+{
+  "name": "virtual-care-mcp",
+  "projectId": "virtual-care-mcp",
+  "githubRepositoryId": "1362801465",
+  "region": "us-east4",
+  "serviceName": "virtual-care-mcp",
+  "artifactRegistryRepository": "site"
+}

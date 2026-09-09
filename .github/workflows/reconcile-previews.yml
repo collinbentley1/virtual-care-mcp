@@ -1,0 +1,27 @@
+name: Reconcile previews
+run-name: ${{ inputs.delivery_nonce && format('recovery-dispatch-{0}', inputs.delivery_nonce) || github.workflow }}
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Reconcile hourly even though mutation jobs use the bounded FIFO queue;
+    # this is the durable backstop for interrupted or externally drifted runs.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      delivery_nonce:
+        description: Correlation nonce for a protected recovery delivery round.
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  reconcile:
+    permissions:
+      actions: read # Download only the exact prefetch artifact id the reusable workflow produces.
+      id-token: write # Exchange only for the exact-SHA preview traffic operator.
+      pull-requests: read # Compare live tags with authoritative pull-request heads.
+    uses: collinbentley1/platform/.github/workflows/reconcile-previews.yml@d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672

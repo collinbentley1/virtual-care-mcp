@@ -1,0 +1,19 @@
+name: Cleanup preview
+run-name: recovery-event-${{ github.event.action }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions: {}
+
+jobs:
+  cleanup:
+    permissions:
+      actions: read # Download only the exact prefetch artifact id the reusable workflow produces.
+      id-token: write # Exchange only for the exact-SHA preview traffic operator.
+      pull-requests: read # Let the reusable cleanup re-read current lifecycle state.
+    uses: collinbentley1/platform/.github/workflows/cleanup-preview.yml@d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672
