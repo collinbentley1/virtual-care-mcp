@@ -9,6 +9,6 @@
 - [ ] Verify deployment: final platform pins, native delivery checks, permanent endpoint, and production persistence.
 - [ ] Publish: public MIT repository and verified deployment, with exact limitations recorded.
 - [x] Runtime locally: verified stable Bun 1.4.2 installed and app verification repeated.
-- [ ] Runtime rollout: merge the reviewed platform source and finish exact consumer pins and their delivery checks.
+- [ ] Runtime rollout: platform source merged as `d0d1a3af340acb712caa5a1c83283a0387c87571`; finish exact consumer pins and their delivery checks.
 
 The controller owns integration, verification, and completion claims. Colleagues own only assigned paths. The user authorized a new public repository, cloud resources following platform patterns, and account testing with synthetic data. No provider backend, real charges, or real clinical service is in scope.

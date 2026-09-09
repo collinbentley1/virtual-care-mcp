@@ -1,20 +1,20 @@
 # Public source hygiene review
 
-Reviewed September 9, 2026. Scope was the 74 files then eligible for publication according to Git, excluding `node_modules`, `dist`, `.git`, and `.local`. The repository had no initial commit, and integration was still in progress. This is a source checkpoint, not approval of a final published commit or a deployed service. The changing UI export implementation was excluded from implementation review.
+The opening section records an initial prepublication checkpoint and is superseded by the final review and pin-closure evidence below. It was reviewed September 9, 2026, when 74 files were eligible for publication according to Git, excluding `node_modules`, `dist`, `.git`, and `.local`. The repository had no initial commit, and integration was still in progress. The changing UI export implementation was excluded from that implementation review.
 
 No real credential, private key, JWT, personal home path, binary artifact, or symlink was found in the publication candidates. The credential-literal matches were explicit fictional values in `test/host/server.ts:31-32` and `test/persistence.test.ts:127,132`. The host fixture uses loopback and a deliberately unavailable local media port. None of those values is represented as a usable production credential.
 
-## Findings
+## Initial findings
 
-### 1. Replace the provisional platform pins before enabling delivery
+### 1. Replace the provisional platform pins before enabling delivery — resolved
 
-Priority P2. Locations include `.github/workflows/application.yml:21`, `.github/workflows/deploy-prod.yml:15,29`, `infra/terraform/bootstrap/main.tf:2,12`, and `infra/terraform/prod/main.tf:2`. The other reusable-workflow callers use the same provisional SHA.
+Initial priority P2. Locations included `.github/workflows/application.yml:21`, `.github/workflows/deploy-prod.yml:15,29`, `infra/terraform/bootstrap/main.tf:2,12`, and `infra/terraform/prod/main.tf:2`. The other reusable-workflow callers used the same provisional SHA.
 
-The files still reference `d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672`. That source predates the new repository registration and keeps the canonical scanner's package ceiling at 128. This application's reviewed lock has 135 entries and its mirrors include the new app contract. The checked-in local scanner and newer mirrors therefore cannot establish that the pinned delivery source supports this application. Delivery checks and repository resolution will fail before a usable deployment.
+At that checkpoint, the files referenced `d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672`. That source predated the new repository registration and kept the canonical scanner's package ceiling at 128. This application's reviewed lock has 135 entries and its mirrors include the new app contract. The checked-in local scanner and newer mirrors therefore could not establish that the pinned delivery source supported this application.
 
-Replace every caller, module reference, and active workflow SHA with the final published, reviewed platform commit, then verify the generated mirrors and exact pin agreement before enabling Actions. `docs/research/platform.md:42-45` already identifies this as a pending integration gate. The independently reviewed local registration candidate is `26db49e7ade09d5e7d97e4aeb0b1a1b414cc7a17`; this report does not claim that it has been published, merged, or activated.
+The final section records this finding's closure against merged platform commit `d0d1a3af340acb712caa5a1c83283a0387c87571`. Delivery activation remains a separate gate.
 
-### 2. Correct the origin selection instruction in the deployment runbook
+### 2. Correct the origin selection instruction in the deployment runbook — resolved
 
 Priority P2. Location `docs/research/platform.md:172-173`.
 
@@ -39,4 +39,6 @@ The independent reviewer found that media controls lacked stable IDs for keyboar
 
 Final application verification passed 74 tests and 507 assertions, formatting, lint, types, and build checks. The [account report](verification-host-accounts.md) separates the tested ChatGPT/Claude artifacts from the subsequent media-ID-only correction and records actual delivery, failure, and cleanup boundaries. No additional publication blocker was found within this scope.
 
-The earlier origin-selection finding is corrected. The provisional platform pin remains an explicit delivery gate: initial source publication does not enable delivery or establish production deployment. Every caller and Terraform module must adopt the actual reviewed merged platform commit before delivery activation. GitHub Actions were disabled and the DHI environment was empty during publication preparation.
+The earlier origin-selection finding is corrected. Platform PR 79 subsequently passed every required job at reviewed head `31626209e4ff51bf200465f11559fda1fb1b1c9e` and merged as `d0d1a3af340acb712caa5a1c83283a0387c87571`. Every caller, Terraform module, and active-workflow value now uses that immutable merge SHA. The merged platform's canonical doctor accepted the complete application contract and exact repository identity. This closes the provisional-pin source finding; it does not establish production deployment.
+
+The pin-update verification also exposed and corrected a concurrent SQLite startup race: the connection now establishes its busy timeout before asking SQLite to enter WAL mode. The existing process-pair test captured `SQLITE_BUSY_RECOVERY` before the fix and passed 100 consecutive runs afterward. Full verification then passed 74 tests and 507 assertions. GitHub Actions remain disabled and the DHI environment remains empty while the remaining enrollment and credentialless delivery gates are completed.

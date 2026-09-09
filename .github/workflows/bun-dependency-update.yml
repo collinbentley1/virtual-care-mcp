@@ -12,4 +12,4 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: collinbentley1/platform/.github/workflows/bun-dependency-update.yml@d4c1bcf6e5700d2a4f75d96b9e09eb122e4d1672
+    uses: collinbentley1/platform/.github/workflows/bun-dependency-update.yml@d0d1a3af340acb712caa5a1c83283a0387c87571
