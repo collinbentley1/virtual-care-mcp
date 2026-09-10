@@ -5,6 +5,10 @@ merged through [PR #79](https://github.com/collinbentley1/platform/pull/79) as
 [`d0d1a3af340acb712caa5a1c83283a0387c87571`](https://github.com/collinbentley1/platform/commit/d0d1a3af340acb712caa5a1c83283a0387c87571).
 The reviewed source head passed every required CI job before the squash merge.
 
+The active source subsequently advanced through [PR #81](https://github.com/collinbentley1/platform/pull/81) as
+[`72fc2e8c48a07a106cfd040908f5dded2e958e43`](https://github.com/collinbentley1/platform/commit/72fc2e8c48a07a106cfd040908f5dded2e958e43).
+That change preserves the protected recovery correlation nonce while constraining its single Checkov exception to the exact reconcile caller, where the nonce can label only the run name. The active application workflows and Terraform modules use this later immutable commit.
+
 ## Registered identities
 
 | Resource | Registered identity |

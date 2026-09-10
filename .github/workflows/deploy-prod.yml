@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # Prove exact-SHA WIF and read cloud metadata for convergence only.
-    uses: collinbentley1/platform/.github/workflows/infrastructure.yml@d0d1a3af340acb712caa5a1c83283a0387c87571
+    uses: collinbentley1/platform/.github/workflows/infrastructure.yml@72fc2e8c48a07a106cfd040908f5dded2e958e43
 
   deploy:
     needs: infrastructure
@@ -26,4 +26,4 @@ jobs:
       contents: read
       id-token: write # Exchange only through exact production publish and deploy paths.
       pull-requests: read # The reusable deploy proves every live preview tag maps to an active PR head.
-    uses: collinbentley1/platform/.github/workflows/deploy-prod.yml@d0d1a3af340acb712caa5a1c83283a0387c87571
+    uses: collinbentley1/platform/.github/workflows/deploy-prod.yml@72fc2e8c48a07a106cfd040908f5dded2e958e43
