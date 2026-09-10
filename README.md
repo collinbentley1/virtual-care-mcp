@@ -18,9 +18,9 @@ bun run build
 bun start
 ```
 
-Open [localhost:3000](http://localhost:3000). The MCP endpoint is `http://localhost:3000/mcp`. Saved fictional visits use SQLite in `.local/visits.sqlite` and expire after 24 hours. The server listens on loopback during local development.
+Open [localhost:3000](http://localhost:3000) for the standalone developer preview. The MCP endpoint is `http://localhost:3000/mcp`. Saved fictional visits use SQLite in `.local/visits.sqlite` and expire after 24 hours. The server listens on loopback during local development.
 
-Choose an older adult, rural adult, or uninsured adult scenario. The journey includes:
+The standalone preview offers older adult, rural adult, and uninsured adult scenarios. Its full-page journey includes:
 
 - Appointment time, US physical location, and time zone.
 - Editable fictional intake, medication and allergy notes, and questions for the care team.
@@ -31,17 +31,19 @@ Choose an older adult, rural adult, or uninsured adult scenario. The journey inc
 
 Access requests are saved preferences. They do not arrange an interpreter, invite a caregiver, translate the interface, or provide live captions. You can finish the practice visit without a camera or microphone.
 
+To inspect the four MCP card surfaces locally, run `bun run test/cards/server.ts` in another shell and open [127.0.0.1:4335](http://127.0.0.1:4335). This isolated AppBridge harness adds the postpartum scenario, including preparation tasks and patient-entered questions. It uses memory-only synthetic fixtures; see its [test instructions and limits](test/cards/README.md).
+
 ## Connect an MCP Apps host
 
 Deploy the server at a public HTTPS origin and add its `/mcp` URL as a custom remote connection in a host that supports MCP Apps. Hosted ChatGPT and Claude connections need an externally reachable endpoint; your computer's localhost URL is insufficient.
 
 Use this starter prompt after enabling the connection:
 
-> Use Virtual Care MCP to start an older-adult fictional practice visit and open its visit UI. Use made-up information only.
+> Use Virtual Care MCP to start a fictional postpartum practice visit. Help me prepare in this conversation, and show the relevant care cards as we go. Use made-up information only.
 
-The assistant calls `care_start`, then `care_render` with the returned resume credential. The same visit can continue in another host by supplying its resume code and asking for `care_resume` and `care_render`. Text tools remain available when the host cannot render the UI.
+The assistant handles the visit in the conversation: it reuses known context, asks only for required missing information, and calls focused tools for each saved action. It shows compact in-context cards only when they add useful interaction: a booked appointment, active consultation, after-visit summary, or postpartum plan. The cards do not replace the conversation or expose the scoped resume credential. The same visit can continue in another host by supplying its resume code and asking to resume it. Text tools remain available when the host cannot render a card.
 
-The app was tested in owned ChatGPT and Claude developer connections, including saved-state continuity and a prerecorded LiveKit participant. Claude and the browser delivered the record downloads. ChatGPT did not start the tested native download or browser handoff; manual browser resume remains available. See the [account verification record](docs/verification-host-accounts.md) for exact builds and limits.
+The earlier shared-visit UI was tested in owned ChatGPT and Claude developer connections, including saved-state continuity and a prerecorded LiveKit participant. Claude and the browser delivered the record downloads. ChatGPT did not start the tested native download or browser handoff; manual browser resume remains available. See the [account verification record](docs/verification-host-accounts.md) for its exact builds and limits. The current card build completed a full postpartum flow through an installed local Codex plugin, and all four card tools returned their expected saved projections. Codex cannot inspect its own task window, so that run does not independently establish the rendered pixels; see the separate [Codex and AppBridge card report](docs/verification-codex-cards.md).
 
 After deploying an updated build, refresh the connection's tool metadata and open a new chat: **Manage → Refresh** in ChatGPT, or **Refresh tools list** in Claude's connector menu. Each HTML/CSP version has an immutable resource URI; existing embeds can retain their previously loaded UI.
 
@@ -49,11 +51,20 @@ After deploying an updated build, refresh the connection's tool metadata and ope
 | --- | --- |
 | `care_start` | Create a new fictional visit. Each call creates a new draft. |
 | `care_resume` | Read the latest saved visit using its scoped resume code. |
-| `care_advance` | Apply a typed command with an expected revision and stable command ID. |
-| `care_simulate_payment` | Rehearse the native MCP x402 challenge, proof, and settlement exchange. |
-| `care_render` | Render the shared MCP Apps visit UI. |
+| `care_book_appointment` | Book a chosen sample appointment. |
+| `care_save_intake`, `care_set_access` | Save fictional visit context and access preferences gathered in conversation. |
+| `care_check_insurance`, `care_choose_payment`, `care_demo_payment` | Rehearse simulated insurance, assistance, or self-pay decisions. |
+| `care_accept_demo_consent` | Save the explicit fictional-data, simulation, telehealth, and location acknowledgments. |
+| `care_begin_consultation`, `care_finish_consultation` | Start or finish the scripted practice consultation. |
+| `care_cancel_visit` | Cancel the fictional visit while retaining its readable record until expiry. |
+| `care_update_maternal_plan` | Complete or reopen postpartum preparation tasks and save patient-entered questions. |
+| `care_show_appointment` | Show the read-only appointment card after booking. |
+| `care_show_consultation` | Show the consultation card; only this card can request camera or microphone access. |
+| `care_show_after_visit` | Show the read-only scripted summary after the consultation finishes. |
+| `care_show_maternal_plan` | Show the postpartum appointment, preparation tasks, and saved questions. |
 | `care_export` | Export the synthetic visit and financial record as FHIR R4 JSON. |
-| `care_media` | Request temporary LiveKit access from the app during consultation. |
+
+Card controls and refreshes call the same focused mutation and read-only card tools available to the assistant. Legacy generic update and payment-exchange plumbing, and temporary LiveKit access, use app-only tools that stay out of the model's normal tool list.
 
 Anyone with a resume code can read the fictional visit until expiry and change it while it remains open. Codes are available to the connected assistant for text continuity; they are not patient authentication. Browser handoff uses a URL fragment, which the UI removes after reading it. The database retains a hash of the code. Media tokens stay separate from the saved record and model-visible tool content.
 

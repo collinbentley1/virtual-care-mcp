@@ -6,7 +6,7 @@ import {
 } from "./contracts.ts";
 import type {
 	AccessNeeds, ActionName, AdvanceInput, CareClient, CareResult, ScenarioId,
-	VisitCommand, VisitCredential, VisitEnvelope, VisitSnapshot, VisitState,
+	VisitCommand, VisitCredential, VisitEnvelope, VisitSnapshot, VisitState, SpecialtyPlan,
 } from "./contracts.ts";
 import { StoreUnavailable } from "./persistence.ts";
 import type { StoredVisit, VisitStore } from "./persistence.ts";
@@ -26,12 +26,16 @@ const scenarios: Record<ScenarioId, { patientDisplay: string; access: AccessNeed
 		patientDisplay: "Taylor Morgan, sample patient",
 		access: { mode: "text", language: "es", interpreterRequested: true, caregiver: { kind: "none" }, captionsRequested: false, largeText: false, lowBandwidth: true },
 	},
+	postpartum: {
+		patientDisplay: "Maya Chen, sample patient",
+		access: { mode: "video", language: "en", interpreterRequested: false, caregiver: { kind: "none" }, captionsRequested: false, largeText: false, lowBandwidth: false },
+	},
 };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const fail = (code: Extract<CareResult, { kind: "error" }>["code"], message: string): CareResult => ({ kind: "error", code, message });
 const closed = (state: VisitState) => state.kind === "complete" || state.kind === "cancelled";
 
-export function availableActions(state: VisitState): ActionName[] {
+function visitActions(state: VisitState): ActionName[] {
 	switch (state.kind) {
 		case "appointment": return ["choose_appointment", "set_access", "cancel_visit"];
 		case "intake": return ["choose_appointment", "save_intake", "set_access", "cancel_visit"];
@@ -46,10 +50,47 @@ export function availableActions(state: VisitState): ActionName[] {
 	}
 }
 
+export function availableActions(state: VisitState, specialtyPlan: SpecialtyPlan = { kind: "none" }): ActionName[] {
+	const actions = visitActions(state);
+	return specialtyPlan.kind === "maternal-postpartum" && state.kind !== "cancelled"
+		? [...actions, "update_maternal_plan"]
+		: actions;
+}
+
+function createSpecialtyPlan(scenarioId: ScenarioId, createdAt: string): SpecialtyPlan {
+	if (scenarioId !== "postpartum") return { kind: "none" };
+	return {
+		kind: "maternal-postpartum", id: randomUUID(), title: "Your next care steps", createdAt, updatedAt: createdAt,
+		timeline: [
+			{ id: "postpartum-check-in", title: "Postpartum check-in", description: "A fictional visit to prepare questions about recovery, support, and the next steps.", provenance: "scripted-demo", timing: { kind: "to-arrange", label: "Choose a sample appointment" }, progress: { kind: "open" } },
+			{ id: "postpartum-follow-up", title: "Your next follow-up", description: "Ask your care team which follow-up fits your needs. This entry does not book an appointment.", provenance: "scripted-demo", timing: { kind: "to-arrange", label: "Agree a date with your care team" }, progress: { kind: "open" } },
+		],
+		tasks: [
+			{ id: "prepare-questions", label: "Write down the questions you want to ask", status: { kind: "open" } },
+			{ id: "arrange-follow-up", label: "Ask your care team about a follow-up date", status: { kind: "open" } },
+		],
+		questions: [
+			{ id: randomUUID(), text: "What support would help me with recovery and rest?", source: "scripted-demo", addedAt: createdAt },
+		],
+	};
+}
+
+function appointmentOptions(now: Date): VisitSnapshot["appointmentOptions"] {
+	const officeTime = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hourCycle: "h23" });
+	const options: VisitSnapshot["appointmentOptions"] = [];
+	let candidate = Math.ceil((now.getTime() + 60 * 60 * 1000) / (30 * 60 * 1000)) * (30 * 60 * 1000);
+	while (options.length < 3) {
+		const hour = Number(officeTime.format(new Date(candidate)));
+		if (hour >= 9 && hour < 17) options.push({ id: `slot-${options.length + 1}`, startsAt: new Date(candidate).toISOString(), durationMinutes: 20, careTeam: "Demo care team" });
+		candidate += 30 * 60 * 1000;
+	}
+	return options;
+}
+
 function envelope(record: StoredVisit, credential: VisitCredential): VisitEnvelope {
 	return {
 		schemaVersion: 1, mode: "synthetic", credential, expiresAt: record.expiresAt,
-		snapshot: record.snapshot, availableActions: availableActions(record.snapshot.state),
+		snapshot: record.snapshot, availableActions: availableActions(record.snapshot.state, record.snapshot.specialtyPlan),
 	};
 }
 function authenticate(record: StoredVisit | null, credential: VisitCredential, now: Date): CareResult | null {
@@ -60,22 +101,25 @@ function authenticate(record: StoredVisit | null, credential: VisitCredential, n
 	return null;
 }
 
-type Transition = { kind: "changed"; state: VisitState; access: AccessNeeds; label: string } | { kind: "failed"; result: CareResult };
+type Transition = { kind: "changed"; state: VisitState; access: AccessNeeds; specialtyPlan: SpecialtyPlan; label: string } | { kind: "failed"; result: CareResult };
 type TransitionContext = { now: Date; ids: { primary: string; secondary: string; reply: string } };
 
 function transition(snapshot: VisitSnapshot, command: VisitCommand, context: TransitionContext): Transition {
 	const state = snapshot.state;
 	const at = context.now.toISOString();
 	const rejected = (message = "That action is not available at this stage. Refresh the visit and use its next action."): Transition => ({ kind: "failed", result: fail("invalid_transition", message) });
-	const changed = (next: VisitState, label: string, access = snapshot.access): Transition => ({ kind: "changed", state: next, access, label });
-	if (!availableActions(state).includes(command.kind)) return rejected();
+	const changed = (next: VisitState, label: string, access = snapshot.access, specialtyPlan = snapshot.specialtyPlan): Transition => ({ kind: "changed", state: next, access, specialtyPlan, label });
+	if (!availableActions(state, snapshot.specialtyPlan).includes(command.kind)) return rejected();
 	switch (command.kind) {
 		case "choose_appointment": {
 			const slot = snapshot.appointmentOptions.find((option) => option.id === command.slotId);
 			if (!slot) return rejected("Choose one of this visit's demo appointment times.");
 			const appointment = { ...slot, locationState: command.locationState, timeZone: command.timeZone };
-			if ("intake" in state) return changed({ kind: "coverage", appointment, intake: state.intake, insuranceCheck: null }, "Demo appointment changed; review coverage and consent again.");
-			return changed({ kind: "intake", appointment }, "Demo appointment saved. No real appointment was booked.");
+			const specialtyPlan: SpecialtyPlan = snapshot.specialtyPlan.kind === "maternal-postpartum"
+				? { ...snapshot.specialtyPlan, updatedAt: at, timeline: snapshot.specialtyPlan.timeline.map((milestone) => milestone.id === "postpartum-check-in" ? { ...milestone, timing: { kind: "scheduled", startsAt: slot.startsAt, timeZone: command.timeZone } } : milestone) }
+				: snapshot.specialtyPlan;
+			if ("intake" in state) return changed({ kind: "coverage", appointment, intake: state.intake, insuranceCheck: null }, "Demo appointment changed; review coverage and consent again.", snapshot.access, specialtyPlan);
+			return changed({ kind: "intake", appointment }, "Demo appointment saved. No real appointment was booked.", snapshot.access, specialtyPlan);
 		}
 		case "save_intake": {
 			if (!("appointment" in state)) return rejected();
@@ -135,19 +179,64 @@ function transition(snapshot: VisitSnapshot, command: VisitCommand, context: Tra
 		}
 		case "finish_consultation": {
 			if (state.kind !== "consulting") return rejected();
+			const specialtyPlan: SpecialtyPlan = snapshot.specialtyPlan.kind === "maternal-postpartum"
+				? {
+					...snapshot.specialtyPlan,
+					updatedAt: at,
+					timeline: snapshot.specialtyPlan.timeline.map((milestone) => milestone.id === "postpartum-check-in"
+						? { ...milestone, progress: { kind: "complete", completedAt: at } }
+						: milestone),
+				}
+				: snapshot.specialtyPlan;
 			return changed({ ...state, kind: "complete", endedAt: at, afterVisit: {
 				id: context.ids.primary, createdAt: at, provenance: "scripted-demo", clinicianReviewed: false,
 				title: "Sample after-visit summary",
-				summary: "You completed a software rehearsal of a virtual care visit. The appointment, care-team handoff, insurance results, payment, and this note were simulated. No clinician assessed your concerns or provided treatment.",
-				nextSteps: ["Review the fictional information you saved before the visit.", "Download or print this sample record to see how visit information can follow you.", "For an actual health concern, contact a licensed care provider. This app has not arranged care."],
+				summary: snapshot.scenarioId === "postpartum"
+					? "Your postpartum practice visit is complete. Your saved questions and appointment plan are ready to review in this conversation. No clinician assessed your recovery or prescribed treatment."
+					: "You completed a software rehearsal of a virtual care visit. The appointment, care-team handoff, insurance results, payment, and this note were simulated. No clinician assessed your concerns or provided treatment.",
+				nextSteps: snapshot.scenarioId === "postpartum"
+					? ["Open your postpartum plan to review the sample appointment and the follow-up still to arrange.", "Add questions you want to bring to your care team.", "Ask your care team about a follow-up date and support for your recovery."]
+					: ["Review the fictional information you saved before the visit.", "Download or print this sample record to see how visit information can follow you.", "For an actual health concern, contact a licensed care provider. This app has not arranged care."],
 				claimStatus: state.billing.kind === "insurance" ? state.billing.eligibility.scenario === "claim-denied" ? "simulated-denied" : "simulated-approved" : "not-applicable",
 				notice: "Sample after-visit summary. No clinician reviewed or signed this document. It contains no personalized medical advice.",
-			} }, "Practice visit completed. A sample after-visit record is available.");
+			} }, "Practice visit completed. A sample after-visit record is available.", snapshot.access, specialtyPlan);
 		}
 		case "set_access": return changed(state, "Access preferences saved.", command.access);
+		case "update_maternal_plan": {
+			const plan = snapshot.specialtyPlan;
+			if (plan.kind !== "maternal-postpartum") return rejected("This visit does not have a postpartum plan.");
+			const update = command.update;
+			switch (update.kind) {
+				case "add_question": {
+					if (plan.questions.length >= 12) return { kind: "failed", result: fail("limit_reached", "Your sample plan has reached its 12-question limit.") };
+					return changed(state, "A patient-entered question was saved to the postpartum plan.", snapshot.access, {
+						...plan, updatedAt: at,
+						questions: [...plan.questions, { id: context.ids.primary, text: update.text, source: "patient-entered", addedAt: at }],
+					});
+				}
+				case "complete_task":
+				case "reopen_task": {
+					if (!plan.tasks.some((task) => task.id === update.taskId)) return rejected("Choose a task from the saved postpartum plan.");
+					return changed(state, update.kind === "complete_task" ? "A preparation task was marked complete. No appointment was booked." : "A preparation task was reopened.", snapshot.access, {
+						...plan, updatedAt: at,
+						tasks: plan.tasks.map((task) => task.id === update.taskId ? { ...task, status: update.kind === "complete_task" ? { kind: "complete", completedAt: at } : { kind: "open" } } : task),
+					});
+				}
+				default: { const unreachable: never = update; return unreachable; }
+			}
+		}
 		case "cancel_visit": {
 			if (closed(state)) return rejected();
-			return changed({ kind: "cancelled", previous: state, cancelledAt: at }, "Demo visit cancelled. Its saved information remains available until expiry.");
+			const specialtyPlan: SpecialtyPlan = snapshot.specialtyPlan.kind === "maternal-postpartum"
+				? {
+					...snapshot.specialtyPlan,
+					updatedAt: at,
+					timeline: snapshot.specialtyPlan.timeline.map((milestone) => milestone.id === "postpartum-check-in" && milestone.progress.kind === "open"
+						? { ...milestone, progress: { kind: "cancelled", cancelledAt: at } }
+						: milestone),
+				}
+				: snapshot.specialtyPlan;
+			return changed({ kind: "cancelled", previous: state, cancelledAt: at }, "Demo visit cancelled. Its saved information remains available until expiry.", snapshot.access, specialtyPlan);
 		}
 		default: { const unreachable: never = command; return unreachable; }
 	}
@@ -170,17 +259,12 @@ export function createCareService(options: { store: VisitStore; now?: () => Date
 				const time = now();
 				const visitId = visitIdSchema.parse(randomUUID());
 				const credential = credentialSchema.parse(`vcm_${visitId}.${randomBytes(32).toString("base64url")}`);
-				const firstSlot = Math.ceil((time.getTime() + 60 * 60 * 1000) / (30 * 60 * 1000)) * (30 * 60 * 1000);
-				const optionsForVisit = [
-					{ id: "slot-1", startsAt: new Date(firstSlot).toISOString(), durationMinutes: 20, careTeam: "Demo care team" },
-					{ id: "slot-2", startsAt: new Date(firstSlot + 4 * 60 * 60 * 1000).toISOString(), durationMinutes: 20, careTeam: "Demo care team" },
-					{ id: "slot-3", startsAt: new Date(firstSlot + 8 * 60 * 60 * 1000).toISOString(), durationMinutes: 20, careTeam: "Demo care team" },
-				] satisfies VisitSnapshot["appointmentOptions"];
 				const scenario = scenarios[parsed.data.scenarioId];
 				const record: StoredVisit = {
 					snapshot: {
 						visitId, revision: 0, scenarioId: parsed.data.scenarioId, patientDisplay: scenario.patientDisplay,
-						access: structuredClone(scenario.access), appointmentOptions: optionsForVisit, paymentHistory: [], state: { kind: "appointment" },
+						access: structuredClone(scenario.access), appointmentOptions: appointmentOptions(time), paymentHistory: [], state: { kind: "appointment" },
+						specialtyPlan: createSpecialtyPlan(parsed.data.scenarioId, time.toISOString()),
 						timeline: [{ revision: 0, at: time.toISOString(), label: "Fictional visit started." }], createdAt: time.toISOString(),
 					},
 					credentialHash: digest(credential), expiresAt: new Date(time.getTime() + retentionMs).toISOString(), receipts: [],
@@ -227,7 +311,7 @@ export function createCareService(options: { store: VisitStore; now?: () => Date
 				const next: StoredVisit = {
 					...record,
 					snapshot: {
-						...record.snapshot, revision, state: result.state, access: result.access,
+						...record.snapshot, revision, state: result.state, access: result.access, specialtyPlan: result.specialtyPlan,
 						timeline: [...record.snapshot.timeline, { revision, at: time.toISOString(), label: result.label }].slice(-100),
 						paymentHistory: request.command.kind === "simulate_payment" && result.state.kind === "consent" && result.state.billing.kind === "self-pay"
 							? [...record.snapshot.paymentHistory, { commandId: request.commandId, quote: result.state.billing.quote, receipt: result.state.billing.receipt }]

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { advanceInputSchema, careResultSchema, commandIdSchema, credentialSchema } from "../src/contracts.ts";
-import type { CareClient, CareResult, VisitCommand, VisitEnvelope } from "../src/contracts.ts";
+import type { CareClient, CareResult, ScenarioId, VisitCommand, VisitEnvelope } from "../src/contracts.ts";
 import { createMemoryStore, createSqliteStore } from "../src/persistence.ts";
 import type { VisitStore } from "../src/persistence.ts";
 import { createCareService } from "../src/visit.ts";
@@ -29,8 +29,8 @@ async function harness(kind: "memory" | "sqlite") {
 async function act(care: CareClient, current: VisitEnvelope, command: VisitCommand): Promise<VisitEnvelope> {
 	return saved(await care.advance({ credential: current.credential, expectedRevision: current.snapshot.revision, commandId: commandIdSchema.parse(randomUUID()), command }));
 }
-async function prepared(care: CareClient): Promise<VisitEnvelope> {
-	let current = saved(await care.start({ scenarioId: "rural-adult" }));
+async function prepared(care: CareClient, scenarioId: ScenarioId = "rural-adult"): Promise<VisitEnvelope> {
+	let current = saved(await care.start({ scenarioId }));
 	current = await act(care, current, { kind: "choose_appointment", slotId: "slot-1", locationState: "NY", timeZone: "America/New_York" });
 	return act(care, current, { kind: "save_intake", intake: {
 		reason: "Fictional follow-up for a sample patient.", goals: "Practice asking questions.", medications: "Sample medication list.", allergies: "None in this fixture.", communicationNotes: "Please speak slowly.",
@@ -178,8 +178,85 @@ for (const kind of ["memory", "sqlite"] satisfies Array<"memory" | "sqlite">) {
 			const later = await care.advance({ credential: current.credential, expectedRevision: current.snapshot.revision, commandId: commandIdSchema.parse(randomUUID()), command: { kind: "enter_consultation", mode: "audio" } });
 			expect(later.kind === "error" && later.code).toBe("invalid_transition");
 		});
+
+		test("cancelling a booked postpartum visit cancels its matching plan milestone", async () => {
+			const { care } = await harness(kind);
+			let current = saved(await care.start({ scenarioId: "postpartum" }));
+			current = await act(care, current, { kind: "choose_appointment", slotId: "slot-1", locationState: "NY", timeZone: "America/New_York" });
+			current = await act(care, current, { kind: "cancel_visit" });
+			if (current.snapshot.state.kind !== "cancelled" || current.snapshot.specialtyPlan.kind !== "maternal-postpartum") throw new Error("The postpartum visit was not cancelled.");
+			expect(current.snapshot.specialtyPlan.timeline.map((milestone) => milestone.progress.kind)).toEqual(["cancelled", "open"]);
+			expect(current.snapshot.specialtyPlan.timeline[0]?.progress).toEqual({ kind: "cancelled", cancelledAt: current.snapshot.state.cancelledAt });
+			expect(current.availableActions).toEqual([]);
+		});
+
+		test("postpartum plan edits survive completion, replay, and conflict without changing the summary or booking a follow-up", async () => {
+			const { care } = await harness(kind);
+			let current = await prepared(care, "postpartum");
+			current = await act(care, current, { kind: "select_payment", choice: { kind: "assistance" } });
+			current = await act(care, current, { kind: "accept_consent", version: "demo-2026-09-09", syntheticDataOnly: true, understandsSimulation: true, telehealthAcknowledged: true, locationConfirmed: true });
+			current = await act(care, current, { kind: "enter_consultation", mode: "audio" });
+			current = await act(care, current, { kind: "finish_consultation" });
+			const completed = structuredClone(current.snapshot.state);
+			expect(current.availableActions).toEqual(["update_maternal_plan"]);
+			if (current.snapshot.specialtyPlan.kind !== "maternal-postpartum") throw new Error("Missing postpartum plan.");
+			const timeline = structuredClone(current.snapshot.specialtyPlan.timeline);
+			expect(timeline.map((milestone) => milestone.timing.kind)).toEqual(["scheduled", "to-arrange"]);
+			expect(timeline.map((milestone) => milestone.progress.kind)).toEqual(["complete", "open"]);
+			expect(timeline[0]?.progress).toEqual({ kind: "complete", completedAt: current.snapshot.state.kind === "complete" ? current.snapshot.state.endedAt : "" });
+			const addQuestion = advanceInputSchema.parse({ credential: current.credential, commandId: randomUUID(), expectedRevision: current.snapshot.revision, command: { kind: "update_maternal_plan", update: { kind: "add_question", text: "What would help me prepare for my next visit?" } } });
+			current = saved(await care.advance(addQuestion));
+			current = await act(care, current, { kind: "update_maternal_plan", update: { kind: "complete_task", taskId: "arrange-follow-up" } });
+			const replay = await care.advance(addQuestion);
+			expect(replay.kind === "ok" && replay.replayed).toBe(true);
+			expect(saved(replay)).toEqual(current);
+			const conflict = await care.advance({ ...addQuestion, commandId: commandIdSchema.parse(randomUUID()) });
+			expect(conflict.kind).toBe("conflict");
+			const invalid = await care.advance({ ...addQuestion, expectedRevision: current.snapshot.revision, commandId: commandIdSchema.parse(randomUUID()), command: { kind: "update_maternal_plan", update: { kind: "reopen_task", taskId: "not-a-task" } } });
+			expect(invalid).toMatchObject({ kind: "error", code: "invalid_transition" });
+			current = await act(care, current, { kind: "update_maternal_plan", update: { kind: "reopen_task", taskId: "arrange-follow-up" } });
+			if (current.snapshot.specialtyPlan.kind !== "maternal-postpartum") throw new Error("Missing postpartum plan.");
+			expect(current.snapshot.specialtyPlan.questions.filter((question) => question.source === "patient-entered")).toHaveLength(1);
+			expect(current.snapshot.specialtyPlan.questions.filter((question) => question.source === "scripted-demo")).toHaveLength(1);
+			expect(current.snapshot.specialtyPlan.tasks.find((task) => task.id === "arrange-follow-up")?.status.kind).toBe("open");
+			expect(current.snapshot.specialtyPlan.timeline).toEqual(timeline);
+			expect(current.snapshot.state).toEqual(completed);
+			expect(saved(await care.resume({ credential: current.credential }))).toEqual(current);
+		});
+
+		test("only active postpartum records accept utility writes, including the same 24-hour expiry", async () => {
+			const { care, advanceTime } = await harness(kind);
+			const ordinary = saved(await care.start({ scenarioId: "rural-adult" }));
+			const command: VisitCommand = { kind: "update_maternal_plan", update: { kind: "add_question", text: "A sample question." } };
+			const submit = (current: VisitEnvelope) => care.advance({ credential: current.credential, commandId: commandIdSchema.parse(randomUUID()), expectedRevision: current.snapshot.revision, command });
+			expect(await submit(ordinary)).toMatchObject({ kind: "error", code: "invalid_transition" });
+			let cancelled = saved(await care.start({ scenarioId: "postpartum" }));
+			cancelled = await act(care, cancelled, { kind: "cancel_visit" });
+			expect(await submit(cancelled)).toMatchObject({ kind: "error", code: "invalid_transition" });
+			const expiring = saved(await care.start({ scenarioId: "postpartum" }));
+			advanceTime(24 * 60 * 60 * 1000);
+			expect(await submit(expiring)).toMatchObject({ kind: "error", code: "expired" });
+		});
 	});
 }
+
+test("sample office-hour slots stay within retention across nighttime and daylight saving changes", async () => {
+	const officeHour = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hourCycle: "h23" });
+	for (const instant of ["2030-09-09T22:00:00.000Z", "2030-09-10T08:45:00.000Z", "2030-03-10T06:30:00.000Z", "2030-11-03T05:30:00.000Z"]) {
+		const now = new Date(instant);
+		const store = createMemoryStore();
+		try {
+			const care = createCareService({ store, now: () => now });
+			const current = saved(await care.start({ scenarioId: "postpartum" }));
+			for (const slot of current.snapshot.appointmentOptions) {
+				expect(Number(officeHour.format(new Date(slot.startsAt)))).toBeGreaterThanOrEqual(9);
+				expect(Number(officeHour.format(new Date(slot.startsAt)))).toBeLessThan(17);
+				expect(Date.parse(slot.startsAt)).toBeGreaterThan(now.getTime());
+				expect(Date.parse(slot.startsAt) + slot.durationMinutes * 60_000).toBeLessThan(Date.parse(current.expiresAt));
+			}
+		} finally { store.close(); }
+	}
+});
 
 test("SQLite resumes after a process-equivalent reopen and never stores the plaintext resume credential", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "virtual-care-restart-"));
@@ -187,8 +264,9 @@ test("SQLite resumes after a process-equivalent reopen and never stores the plai
 	let store: VisitStore = await createSqliteStore(path);
 	cleanup.push(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
 	let care = createCareService({ store });
-	let current = await prepared(care);
+	let current = await prepared(care, "postpartum");
 	current = await act(care, current, { kind: "select_payment", choice: { kind: "assistance" } });
+	current = await act(care, current, { kind: "update_maternal_plan", update: { kind: "add_question", text: "A question to keep after reopening the sample record." } });
 	store.close();
 	store = await createSqliteStore(path);
 	care = createCareService({ store });

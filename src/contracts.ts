@@ -12,7 +12,7 @@ export const visitIdSchema = z.string().uuid().brand<"VisitId">();
 export const commandIdSchema = z.string().uuid().brand<"CommandId">();
 export const credentialSchema = z.string().regex(/^vcm_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/).brand<"VisitCredential">();
 export const instantSchema = z.iso.datetime();
-export const scenarioSchema = z.enum(["rural-adult", "older-adult", "uninsured-adult"]);
+export const scenarioSchema = z.enum(["rural-adult", "older-adult", "uninsured-adult", "postpartum"]);
 export const modeSchema = z.enum(["video", "audio", "text"]);
 export const insuranceScenarioSchema = z.enum([
 	"active-copay", "inactive", "unknown-member", "benefits-unavailable",
@@ -141,6 +141,54 @@ export const timelineEventSchema = z.object({
 	at: instantSchema,
 	label: z.string().max(200),
 }).strict();
+export const planMilestoneSchema = z.object({
+	id: z.string().min(1).max(80),
+	title: z.string().min(1).max(160),
+	description: z.string().max(600),
+	provenance: z.literal("scripted-demo"),
+	timing: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("scheduled"), startsAt: instantSchema, timeZone: appointmentSchema.shape.timeZone }).strict(),
+		z.object({ kind: z.literal("to-arrange"), label: z.string().min(1).max(200) }).strict(),
+	]),
+	progress: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("open") }).strict(),
+		z.object({ kind: z.literal("complete"), completedAt: instantSchema }).strict(),
+		z.object({ kind: z.literal("cancelled"), cancelledAt: instantSchema }).strict(),
+	]),
+}).strict();
+export const planTaskSchema = z.object({
+	id: z.string().min(1).max(80),
+	label: z.string().min(1).max(200),
+	status: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("open") }).strict(),
+		z.object({ kind: z.literal("complete"), completedAt: instantSchema }).strict(),
+	]),
+}).strict();
+export const planQuestionSchema = z.object({
+	id: z.string().uuid(),
+	text: textField(600).min(1),
+	source: z.enum(["scripted-demo", "patient-entered"]),
+	addedAt: instantSchema,
+}).strict();
+export const maternalPlanSchema = z.object({
+	kind: z.literal("maternal-postpartum"),
+	id: z.string().uuid(),
+	title: z.literal("Your next care steps"),
+	createdAt: instantSchema,
+	updatedAt: instantSchema,
+	timeline: z.array(planMilestoneSchema).max(8),
+	tasks: z.array(planTaskSchema).max(12),
+	questions: z.array(planQuestionSchema).max(12),
+}).strict();
+export const specialtyPlanSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("none") }).strict(),
+	maternalPlanSchema,
+]);
+export const maternalPlanUpdateSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("complete_task"), taskId: planTaskSchema.shape.id }).strict(),
+	z.object({ kind: z.literal("reopen_task"), taskId: planTaskSchema.shape.id }).strict(),
+	z.object({ kind: z.literal("add_question"), text: planQuestionSchema.shape.text }).strict(),
+]);
 export const visitSnapshotSchema = z.object({
 	visitId: visitIdSchema,
 	revision: z.number().int().min(0),
@@ -152,6 +200,7 @@ export const visitSnapshotSchema = z.object({
 	state: visitStateSchema,
 	timeline: z.array(timelineEventSchema).max(100),
 	createdAt: instantSchema,
+	specialtyPlan: specialtyPlanSchema.default({ kind: "none" }),
 }).strict();
 
 export const paymentChoiceSchema = z.discriminatedUnion("kind", [
@@ -170,10 +219,11 @@ export const visitCommandSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("finish_consultation") }).strict(),
 	z.object({ kind: z.literal("set_access"), access: accessNeedsSchema }).strict(),
 	z.object({ kind: z.literal("cancel_visit") }).strict(),
+	z.object({ kind: z.literal("update_maternal_plan"), update: maternalPlanUpdateSchema }).strict(),
 ]);
 export const actionNameSchema = z.enum([
 	"choose_appointment", "save_intake", "select_payment", "simulate_payment", "accept_consent",
-	"enter_consultation", "send_demo_message", "finish_consultation", "set_access", "cancel_visit",
+	"enter_consultation", "send_demo_message", "finish_consultation", "set_access", "cancel_visit", "update_maternal_plan",
 ]);
 export const visitEnvelopeSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -195,6 +245,76 @@ export const careResultSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("conflict"), envelope: visitEnvelopeSchema, message: z.string() }).strict(),
 	z.object({ kind: z.literal("error"), code: z.enum(["invalid_input", "not_found", "expired", "invalid_transition", "command_reused", "quote_expired", "payment_declined", "temporarily_unavailable", "limit_reached"]), message: z.string() }).strict(),
 ]);
+
+const cardShape = {
+	schemaVersion: z.literal(2),
+	mode: z.literal("synthetic"),
+	visitId: visitIdSchema,
+	revision: z.number().int().min(0),
+	expiresAt: instantSchema,
+	patientDisplay: visitSnapshotSchema.shape.patientDisplay,
+	access: accessNeedsSchema,
+	availableActions: z.array(actionNameSchema),
+};
+export const appointmentCardSchema = z.object({
+	...cardShape,
+	cardKind: z.literal("appointment"),
+	purpose: z.string().max(1200),
+	appointment: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("not-booked") }).strict(),
+		z.object({ kind: z.literal("booked"), details: appointmentSchema, status: z.enum(["scheduled", "cancelled", "complete"]), readyToJoin: z.boolean() }).strict(),
+	]),
+}).strict();
+export const consultationCardSchema = z.object({
+	...cardShape,
+	cardKind: z.literal("consultation"),
+	purpose: z.string().max(1200),
+	consultation: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("not-started"), canBegin: z.boolean(), mode: modeSchema }).strict(),
+		z.object({ kind: z.literal("active"), id: consultationSchema.shape.id, generation: consultationSchema.shape.generation, startedAt: instantSchema, mode: modeSchema }).strict(),
+		z.object({ kind: z.literal("ended"), id: consultationSchema.shape.id, endedAt: instantSchema, mode: modeSchema }).strict(),
+		z.object({ kind: z.literal("cancelled") }).strict(),
+	]),
+}).strict();
+export const afterVisitCardSchema = z.object({
+	...cardShape,
+	cardKind: z.literal("after-visit"),
+	afterVisit: z.discriminatedUnion("kind", [
+		z.object({ kind: z.literal("not-ready") }).strict(),
+		z.object({ kind: z.literal("available"), summary: afterVisitSchema, appointment: appointmentSchema, endedAt: instantSchema }).strict(),
+	]),
+	hasMaternalPlan: z.boolean(),
+}).strict();
+export const maternalPlanCardSchema = z.object({
+	...cardShape,
+	cardKind: z.literal("maternal-plan"),
+	plan: specialtyPlanSchema,
+	canEdit: z.boolean(),
+}).strict();
+export const cardResultSchema = z.discriminatedUnion("cardKind", [appointmentCardSchema, consultationCardSchema, afterVisitCardSchema, maternalPlanCardSchema]);
+export const cardKindSchema = z.enum(["appointment", "consultation", "after-visit", "maternal-plan"]);
+
+export const mutationInputSchema = advanceInputSchema.omit({ command: true });
+export const bookAppointmentInputSchema = mutationInputSchema.extend({ slotId: appointmentSlotSchema.shape.id, locationState: z.enum(usStates), timeZone: appointmentSchema.shape.timeZone }).strict();
+export const saveIntakeInputSchema = mutationInputSchema.extend({
+	intake: intakeSchema.extend({
+		goals: intakeSchema.shape.goals.default(""),
+		medications: intakeSchema.shape.medications.default(""),
+		allergies: intakeSchema.shape.allergies.default(""),
+		communicationNotes: intakeSchema.shape.communicationNotes.default(""),
+	}).strict(),
+	access: accessNeedsSchema,
+}).strict();
+export const setAccessInputSchema = mutationInputSchema.extend({ access: accessNeedsSchema }).strict();
+export const checkInsuranceInputSchema = mutationInputSchema.extend({ scenario: insuranceScenarioSchema }).strict();
+export const choosePaymentInputSchema = mutationInputSchema.extend({ choice: z.enum(["self-pay", "assistance"]) }).strict();
+export const acceptConsentInputSchema = mutationInputSchema.extend({
+	version: consentSchema.shape.version,
+	syntheticDataOnly: z.literal(true), understandsSimulation: z.literal(true),
+	telehealthAcknowledged: z.literal(true), locationConfirmed: z.literal(true),
+}).strict();
+export const beginConsultationInputSchema = mutationInputSchema.extend({ mode: modeSchema }).strict();
+export const updateMaternalPlanInputSchema = mutationInputSchema.extend({ update: maternalPlanUpdateSchema }).strict();
 
 export const mediaInputSchema = resumeInputSchema.extend({ mode: z.enum(["video", "audio"]) }).strict();
 export const mediaResultSchema = z.discriminatedUnion("kind", [
@@ -226,6 +346,17 @@ export type AdvanceInput = z.infer<typeof advanceInputSchema>;
 export type CareResult = z.infer<typeof careResultSchema>;
 export type MediaInput = z.infer<typeof mediaInputSchema>;
 export type MediaResult = z.infer<typeof mediaResultSchema>;
+export type MaternalPlan = z.infer<typeof maternalPlanSchema>;
+export type SpecialtyPlan = z.infer<typeof specialtyPlanSchema>;
+export type PlanMilestone = z.infer<typeof planMilestoneSchema>;
+export type PlanTask = z.infer<typeof planTaskSchema>;
+export type PlanQuestion = z.infer<typeof planQuestionSchema>;
+export type CardKind = z.infer<typeof cardKindSchema>;
+export type CardResult = z.infer<typeof cardResultSchema>;
+export type AppointmentCard = z.infer<typeof appointmentCardSchema>;
+export type ConsultationCard = z.infer<typeof consultationCardSchema>;
+export type AfterVisitCard = z.infer<typeof afterVisitCardSchema>;
+export type MaternalPlanCard = z.infer<typeof maternalPlanCardSchema>;
 
 export interface CareClient {
 	start(input: StartInput): Promise<CareResult>;

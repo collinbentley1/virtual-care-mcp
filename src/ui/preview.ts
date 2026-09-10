@@ -30,7 +30,7 @@ if (!root) throw new Error("The visit application container is missing.");
 
 root.innerHTML = `
 	<header class="site-header">
-		<span class="demo-label">Demo visit</span>
+		<span class="demo-label">Developer preview</span>
 		<div class="header-actions">
 			<button class="text-button small" data-action="larger-text" aria-pressed="false">Larger text</button>
 			<button class="text-button small" data-action="overview" id="header-visit-details" hidden>Visit details</button>
