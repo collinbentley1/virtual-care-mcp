@@ -1,5 +1,5 @@
 module "bootstrap" {
-  source                      = "github.com/collinbentley1/platform//terraform/modules/bootstrap?ref=d0d1a3af340acb712caa5a1c83283a0387c87571"
+  source                      = "github.com/collinbentley1/platform//terraform/modules/bootstrap?ref=72fc2e8c48a07a106cfd040908f5dded2e958e43"
   app                         = "virtual-care-mcp"
   project_id                  = var.project_id
   region                      = var.region
@@ -9,7 +9,7 @@ module "bootstrap" {
   github_owner                = var.github_owner
   github_repo                 = var.github_repo
   github_repository_id        = var.github_repository_id
-  active_workflow_sha         = "d0d1a3af340acb712caa5a1c83283a0387c87571"
+  active_workflow_sha         = "72fc2e8c48a07a106cfd040908f5dded2e958e43"
   required_services = [
     "artifactregistry.googleapis.com",
     "cloudasset.googleapis.com",
