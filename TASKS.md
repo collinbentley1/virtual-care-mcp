@@ -5,7 +5,7 @@
 - [x] Synthesize: choose module boundaries and typed contracts; record alternatives and rationale.
 - [x] Implement: MCP server, visit UI, LiveKit integration, and mocked billing.
 - [ ] Infrastructure: complete platform enrollment, protected delivery configuration, and production Firestore/Cloud Run setup.
-- [x] Verify app: 74 automated tests, accessible browser flows, actual ChatGPT and Claude developer testing, and incoming prerecorded media.
+- [x] Verify app: 84 automated tests, accessible browser and AppBridge flows, an installed Codex plugin flow, earlier ChatGPT and Claude developer testing, and incoming prerecorded media.
 - [ ] Verify deployment: final platform pins, native delivery checks, permanent endpoint, and production persistence.
 - [ ] Publish: public MIT repository and verified deployment, with exact limitations recorded.
 - [x] Runtime locally: verified stable Bun 1.4.2 installed and app verification repeated.

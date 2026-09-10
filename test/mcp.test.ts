@@ -9,10 +9,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createMockPaymentPayload, mockPaymentRequiredSchema, syntheticFhirBundleSchema } from "../src/billing.ts";
-import { advanceInputSchema, careResultSchema, mediaResultSchema, type CareResult, type VisitCommand, type VisitEnvelope } from "../src/contracts.ts";
-import { getVisitResourceUri, paymentInputSchema, type McpOptions } from "../src/mcp.ts";
+import { advanceInputSchema, cardResultSchema, careResultSchema, mediaResultSchema, type CareResult, type VisitCommand, type VisitEnvelope } from "../src/contracts.ts";
+import { getCardResourceUri, getVisitResourceUri, paymentInputSchema, type McpOptions } from "../src/mcp.ts";
 import { createSqliteStore } from "../src/persistence.ts";
 import { createRequestHandler, type RequestHandlerOptions } from "../src/server.ts";
+import { renderCard } from "../src/ui/card-render.ts";
 import { createCareService } from "../src/visit.ts";
 import { omitNullObjectProperties } from "./host/null-omission.ts";
 
@@ -170,19 +171,33 @@ describe("MCP Apps transport", () => {
 		expect(getVisitResourceUri({ ...identity, uiHtml: `${identity.uiHtml}<!-- updated -->` })).not.toBe(getVisitResourceUri(identity));
 		expect(getVisitResourceUri({ ...identity, mediaConnectOrigins: ["wss://other-media.example", "https://other-media.example"] })).not.toBe(getVisitResourceUri(identity));
 		expect(getVisitResourceUri({ ...identity, publicOrigin: "https://other-care.example" })).not.toBe(getVisitResourceUri(identity));
+		expect(getCardResourceUri(identity, "appointment")).not.toBe(getCardResourceUri(identity, "consultation"));
+		expect(getCardResourceUri({ ...identity, mediaConnectOrigins: ["wss://other-media.example"] }, "appointment")).toBe(getCardResourceUri(identity, "appointment"));
+		expect(getCardResourceUri({ ...identity, cardHtml: "<p>A new card</p>" }, "appointment")).not.toBe(getCardResourceUri(identity, "appointment"));
 	});
 
 	test("advertises standard resource metadata, strict inputs, and app-only media access", async () => {
 		const h = await harness();
 		const tools = await h.client.listTools();
-		expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
-			"care_advance", "care_export", "care_media", "care_render", "care_resume", "care_simulate_payment", "care_start",
-		]);
-		expect(tools.tools.find((tool) => tool.name === "care_render")?._meta).toMatchObject({ ui: { resourceUri: h.resourceUri } });
+		expect(tools.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+			"care_start", "care_resume", "care_book_appointment", "care_save_intake", "care_check_insurance", "care_choose_payment", "care_demo_payment", "care_accept_demo_consent", "care_begin_consultation", "care_finish_consultation", "care_update_maternal_plan",
+		]));
+		expect(tools.tools.find((tool) => tool.name === "care_show_consultation")?._meta).toMatchObject({ ui: { resourceUri: h.resourceUri } });
+		for (const name of ["care_advance", "care_render", "care_simulate_payment"]) expect(tools.tools.find((tool) => tool.name === name)?._meta).toEqual({ ui: { visibility: ["app"] } });
 		expect(tools.tools.find((tool) => tool.name === "care_media")?._meta).toEqual({ ui: { visibility: ["app"] } });
-		expect(tools.tools.find((tool) => tool.name === "care_advance")?.inputSchema.additionalProperties).toBe(false);
+		expect(tools.tools.find((tool) => tool.name === "care_book_appointment")?.inputSchema.additionalProperties).toBe(false);
 		const resources = await h.client.listResources();
-		expect(resources.resources.map((resource) => resource.uri)).toEqual([h.resourceUri]);
+		expect(resources.resources).toHaveLength(4);
+		for (const entry of resources.resources) {
+			const result = await h.client.readResource({ uri: entry.uri });
+			const cardTool = tools.tools.find((tool) => JSON.stringify(tool._meta).includes(entry.uri));
+			expect(cardTool?.annotations?.readOnlyHint).toBe(true);
+			expect(cardTool?.outputSchema?.type).toBe("object");
+			if (entry.uri !== h.resourceUri) {
+				expect(JSON.stringify(result)).not.toContain('"permissions"');
+				expect(result.contents[0]).toMatchObject({ _meta: { ui: { csp: { connectDomains: [] } } } });
+			}
+		}
 		const resource = await h.client.readResource({ uri: h.resourceUri });
 		expect(resource.contents[0]).toMatchObject({
 			uri: h.resourceUri, mimeType: "text/html;profile=mcp-app",
@@ -191,6 +206,104 @@ describe("MCP Apps transport", () => {
 		expect(resource.contents[0]).toMatchObject({ text: expect.stringContaining(`${publicOrigin}/livekit.js`) });
 		expect(JSON.stringify(resource)).not.toContain("__VIRTUAL_CARE_ASSET_ORIGIN__");
 		expect((await h.call("care_start", { scenarioId: "rural-adult", patientName: "Unexpected input" })).isError).toBe(true);
+	});
+
+	test("focused model tools complete a postpartum visit and four cards reveal only their saved projections", async () => {
+		const h = await harness();
+		const initialResult = await h.call("care_start", { scenarioId: "postpartum" });
+		let current = saved(initialResult.structuredContent);
+		expect(JSON.stringify(initialResult.content)).not.toContain(current.credential);
+		const invoke = async (name: string, fields: Record<string, unknown> = {}) => {
+			const response = await h.call(name, { credential: current.credential, commandId: crypto.randomUUID(), expectedRevision: current.snapshot.revision, ...fields });
+			current = saved(response.structuredContent);
+			return response;
+		};
+		const early = cardResultSchema.parse((await h.call("care_show_after_visit", { credential: current.credential })).structuredContent);
+		expect(early).toMatchObject({ cardKind: "after-visit", afterVisit: { kind: "not-ready" } });
+		await invoke("care_book_appointment", { slotId: "slot-1", locationState: "NY", timeZone: "America/New_York" });
+		await invoke("care_save_intake", { intake: { reason: "Fictional postpartum check-in about recovery and support." }, access: current.snapshot.access });
+		if (current.snapshot.state.kind !== "coverage") throw new Error("Intake was not saved.");
+		expect(current.snapshot.state.intake).toMatchObject({ medications: "", allergies: "", goals: "", communicationNotes: "" });
+		await invoke("care_check_insurance", { scenario: "active-copay" });
+		const { kind: _consentKind, ...acknowledgments } = consent;
+		await invoke("care_accept_demo_consent", acknowledgments);
+		const appointment = cardResultSchema.parse((await h.call("care_show_appointment", { credential: current.credential })).structuredContent);
+		expect(appointment).toMatchObject({ cardKind: "appointment", purpose: "Fictional postpartum check-in about recovery and support.", appointment: { kind: "booked", readyToJoin: true } });
+		await invoke("care_begin_consultation", { mode: "video" });
+		const active = cardResultSchema.parse((await h.call("care_show_consultation", { credential: current.credential })).structuredContent);
+		expect(active).toMatchObject({ cardKind: "consultation", consultation: { kind: "active", mode: "video" } });
+		await invoke("care_finish_consultation");
+		const completed = structuredClone(current.snapshot.state);
+		const question = { credential: current.credential, commandId: crypto.randomUUID(), expectedRevision: current.snapshot.revision, update: { kind: "add_question", text: "What support can I ask for when I need more rest?" } };
+		current = saved((await h.call("care_update_maternal_plan", question)).structuredContent);
+		await invoke("care_update_maternal_plan", { update: { kind: "complete_task", taskId: "prepare-questions" } });
+		const replay = careResultSchema.parse((await h.call("care_update_maternal_plan", question)).structuredContent);
+		expect(replay.kind === "ok" && replay.replayed).toBe(true);
+		expect(saved(replay)).toEqual(current);
+		const conflict = careResultSchema.parse((await h.call("care_update_maternal_plan", { ...question, commandId: crypto.randomUUID(), update: { kind: "reopen_task", taskId: "prepare-questions" } })).structuredContent);
+		expect(conflict.kind).toBe("conflict");
+		for (const name of ["care_show_appointment", "care_show_consultation", "care_show_after_visit", "care_show_maternal_plan"]) {
+			const response = await h.call(name, { credential: current.credential });
+			const card = cardResultSchema.parse(response.structuredContent);
+			expect(card.revision).toBe(current.snapshot.revision);
+			expect(response._meta?.["virtual-care/credential"]).toBe(current.credential);
+			expect(JSON.stringify(card)).not.toContain(current.credential);
+			expect(JSON.stringify(card)).not.toContain('"paymentHistory"');
+			expect(JSON.stringify(card)).not.toContain('"credential"');
+			expect("timeline" in card).toBe(false);
+			if (card.cardKind === "maternal-plan") {
+				expect(card.canEdit).toBe(true);
+				if (card.plan.kind !== "maternal-postpartum") throw new Error("Postpartum plan is missing.");
+				expect(card.plan.title).toBe("Your next care steps");
+				expect(card.plan.questions.filter((entry) => entry.source === "patient-entered")).toHaveLength(1);
+				expect(card.plan.timeline.map((entry) => entry.timing.kind)).toEqual(["scheduled", "to-arrange"]);
+				expect(card.plan.timeline.map((entry) => entry.progress.kind)).toEqual(["complete", "open"]);
+			}
+			if (card.cardKind === "consultation") expect(card.consultation.kind).toBe("ended");
+			if (card.cardKind === "after-visit") expect(card.afterVisit).toMatchObject({ kind: "available", summary: { provenance: "scripted-demo", clinicianReviewed: false } });
+		}
+		expect(saved((await h.call("care_resume", { credential: current.credential })).structuredContent).snapshot.state).toEqual(completed);
+		h.advanceTime(24 * 60 * 60 * 1000);
+		const expired = await h.call("care_show_maternal_plan", { credential: current.credential });
+		expect(expired.isError).toBe(true);
+		expect(expired.structuredContent).toBeUndefined();
+	});
+
+	test("ordinary demo payment preserves quote binding and replay without protocol metadata", async () => {
+		const h = await harness();
+		let current = await prepared(h);
+		current = saved((await h.call("care_choose_payment", { credential: current.credential, expectedRevision: current.snapshot.revision, commandId: crypto.randomUUID(), choice: "self-pay" })).structuredContent);
+		if (current.snapshot.state.kind !== "payment") throw new Error("Missing sample quote.");
+		const input = { credential: current.credential, expectedRevision: current.snapshot.revision, commandId: crypto.randomUUID(), quoteId: current.snapshot.state.quote.id, outcome: "approve" };
+		const declined = await h.call("care_demo_payment", { ...input, commandId: crypto.randomUUID(), outcome: "decline" });
+		expect(declined.isError).toBe(false);
+		expect(declined.structuredContent).toMatchObject({ kind: "error", code: "payment_declined" });
+		const paid = await h.call("care_demo_payment", input);
+		current = saved(paid.structuredContent);
+		expect(current.snapshot.paymentHistory).toHaveLength(1);
+		expect(paid._meta?.["x402/payment-response"]).toBeDefined();
+		current = await act(h, current, { kind: "select_payment", choice: { kind: "assistance" } });
+		h.advanceTime(16 * 60 * 1000);
+		const replay = careResultSchema.parse((await h.call("care_demo_payment", input)).structuredContent);
+		expect(replay.kind === "ok" && replay.replayed).toBe(true);
+		expect(saved(replay)).toEqual(current);
+		expect((await h.call("care_demo_payment", { ...input, commandId: crypto.randomUUID() })).structuredContent).toMatchObject({ kind: "conflict" });
+		expect((await h.call("care_demo_payment", { ...input, outcome: "decline" })).structuredContent).toMatchObject({ kind: "error", code: "command_reused" });
+		expect(saved((await h.call("care_resume", { credential: current.credential })).structuredContent).snapshot.paymentHistory).toHaveLength(1);
+	});
+
+	test("a cancelled postpartum appointment is not rendered as the next upcoming milestone", async () => {
+		const h = await harness();
+		let current = saved((await h.call("care_start", { scenarioId: "postpartum" })).structuredContent);
+		current = await act(h, current, { kind: "choose_appointment", slotId: "slot-1", locationState: "NY", timeZone: "America/New_York" });
+		current = await act(h, current, { kind: "cancel_visit" });
+		const card = cardResultSchema.parse((await h.call("care_show_maternal_plan", { credential: current.credential })).structuredContent);
+		if (card.cardKind !== "maternal-plan" || card.plan.kind !== "maternal-postpartum") throw new Error("The cancelled postpartum plan card was not available.");
+		expect(card.canEdit).toBe(false);
+		expect(card.plan.timeline[0]?.progress.kind).toBe("cancelled");
+		const html = renderCard(card, { questionOpen: false, question: "" });
+		expect(html).toContain("Canceled");
+		expect(html).not.toContain("next-milestone");
 	});
 
 	test("completes a visit through the official client and exports the saved synthetic record", async () => {

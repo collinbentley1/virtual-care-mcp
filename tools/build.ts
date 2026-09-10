@@ -12,13 +12,20 @@ await mkdir(join(dist, "public"), { recursive: true });
 await cp(join(root, "public"), join(dist, "public"), { recursive: true });
 
 const ui = await Bun.build({
-	entrypoints: [join(root, "src/ui/main.ts")], outdir: join(dist, "public"),
+	entrypoints: [join(root, "src/ui/preview.ts")], outdir: join(dist, "public"),
 	naming: "app.js", target: "browser", minify: true, splitting: false,
 	drop: ["console", "debugger"],
 	external: ["virtual-care-livekit"],
 	define: { "process.env.NODE_ENV": JSON.stringify("production") },
 });
 if (!ui.success) throw new AggregateError(ui.logs, "The visit UI did not build.");
+const cards = await Bun.build({
+	entrypoints: [join(root, "src/ui/card.ts")], outdir: join(dist, "public"),
+	naming: "card.js", target: "browser", minify: true, splitting: false,
+	drop: ["console", "debugger"], external: ["virtual-care-livekit"],
+	define: { "process.env.NODE_ENV": JSON.stringify("production") },
+});
+if (!cards.success) throw new AggregateError(cards.logs, "The in-context visit cards did not build.");
 const media = await Bun.build({
 	entrypoints: [join(root, "tools/livekit-entry.ts")], outdir: join(dist, "public"),
 	naming: "livekit.js", target: "browser", minify: true,
@@ -35,13 +42,15 @@ const sourceHtml = await readFile(join(dist, "public/index.html"), "utf8");
 const importMap = `<script type="importmap">${JSON.stringify({ imports: { "virtual-care-livekit": "/livekit.js" } })}</script>`;
 const html = sourceHtml.replace(/<script\b[^>]*src=["']\/?app\.js["'][^>]*>/i, (tag) => `${importMap}\n${tag}`);
 await writeFile(join(dist, "public/index.html"), html);
-const script = (await readFile(join(dist, "public/app.js"), "utf8")).replace(/<\/script/gi, "<\\/script");
-const styles = (await readFile(join(dist, "public/styles.css"), "utf8")).replace(/<\/style/gi, "<\\/style");
-const embedded = html
-	.replace(/<link\b[^>]*href=["']\/?styles\.css["'][^>]*>/i, () => `<style>${styles}</style>`)
-	.replace(/<script\b[^>]*src=["']\/?app\.js["'][^>]*>\s*<\/script>/i, () => `<script type="module">${script}</script>`)
+const cardHtml = (await readFile(join(dist, "public/card.html"), "utf8")).replace(/<script\b[^>]*src=["']\/?card\.js["'][^>]*>/i, (tag) => `${importMap}\n${tag}`);
+await writeFile(join(dist, "public/card.html"), cardHtml);
+const script = (await readFile(join(dist, "public/card.js"), "utf8")).replace(/<\/script/gi, "<\\/script");
+const styles = (await readFile(join(dist, "public/card.css"), "utf8")).replace(/<\/style/gi, "<\\/style");
+const embedded = cardHtml
+	.replace(/<link\b[^>]*href=["']\/?card\.css["'][^>]*>/i, () => `<style>${styles}</style>`)
+	.replace(/<script\b[^>]*src=["']\/?card\.js["'][^>]*>\s*<\/script>/i, () => `<script type="module">${script}</script>`)
 	.replace('"/livekit.js"', '"__VIRTUAL_CARE_ASSET_ORIGIN__/livekit.js"');
-if (embedded === html || /(?:src|href)=["']\/(?:app\.js|styles\.css)/.test(embedded)) {
+if (embedded === cardHtml || /(?:src|href)=["']\/(?:card\.js|card\.css)/.test(embedded)) {
 	throw new Error("The MCP HTML resource must inline the app script and stylesheet.");
 }
 await writeFile(join(dist, "mcp-app.html"), embedded);
