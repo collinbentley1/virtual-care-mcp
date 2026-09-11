@@ -9,6 +9,6 @@
 - [ ] Verify deployment: final platform pins, native delivery checks, permanent endpoint, and production persistence.
 - [ ] Publish: public MIT repository and verified deployment, with exact limitations recorded.
 - [x] Runtime locally: verified stable Bun 1.4.2 installed and app verification repeated.
-- [ ] Runtime rollout: active platform source merged as `72fc2e8c48a07a106cfd040908f5dded2e958e43`; finish exact consumer pins and their delivery checks.
+- [ ] Runtime rollout: activate platform `f857a58e3ecac63b2b3882809efbfb7136bfa6c3` through the reviewed pin PR and its exact-head checks; record WIF transition, native production delivery, and live endpoint/persistence verification separately.
 
 The controller owns integration, verification, and completion claims. Colleagues own only assigned paths. The user authorized a new public repository, cloud resources following platform patterns, and account testing with synthetic data. No provider backend, real charges, or real clinical service is in scope.
