@@ -5,9 +5,11 @@ merged through [PR #79](https://github.com/collinbentley1/platform/pull/79) as
 [`d0d1a3af340acb712caa5a1c83283a0387c87571`](https://github.com/collinbentley1/platform/commit/d0d1a3af340acb712caa5a1c83283a0387c87571).
 The reviewed source head passed every required CI job before the squash merge.
 
-The active source subsequently advanced through [PR #81](https://github.com/collinbentley1/platform/pull/81) as
+The source subsequently advanced through [PR #81](https://github.com/collinbentley1/platform/pull/81) as
 [`72fc2e8c48a07a106cfd040908f5dded2e958e43`](https://github.com/collinbentley1/platform/commit/72fc2e8c48a07a106cfd040908f5dded2e958e43).
-That change preserves the protected recovery correlation nonce while constraining its single Checkov exception to the exact reconcile caller, where the nonce can label only the run name. The active application workflows and Terraform modules use this later immutable commit.
+That change preserves the protected recovery correlation nonce while constraining its single Checkov exception to the exact reconcile caller, where the nonce can label only the run name.
+
+[Platform PR #83](https://github.com/collinbentley1/platform/pull/83) later fixed environment-secret resolution across reusable workflow boundaries and refreshed the verified Grype database. Every required pull-request job passed before it merged as [`dbf956f3f9c2bbad252e2899e198ecf25c1cb64f`](https://github.com/collinbentley1/platform/commit/dbf956f3f9c2bbad252e2899e198ecf25c1cb64f), and every required post-merge job passed afterward. The active application workflows and Terraform modules use that immutable commit. Source activation and production deployment remain separate evidence.
 
 ## Registered identities
 
