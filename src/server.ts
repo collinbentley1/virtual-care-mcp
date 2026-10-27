@@ -1,3 +1,4 @@
+import { secureHandler } from "../.platform/runtime/http.ts";
 import { resolve, sep } from "node:path";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -87,7 +88,7 @@ function methodNotAllowed(allow: string): Response {
 	return new Response(null, { status: 405, headers: { Allow: allow, "Cache-Control": "no-store" } });
 }
 
-export function createRequestHandler(options: RequestHandlerOptions): (request: Request) => Promise<Response> {
+function applicationHandler(options: RequestHandlerOptions): (request: Request) => Promise<Response> {
 	const publicUrl = new URL(options.publicOrigin);
 	if (!/^https?:$/.test(publicUrl.protocol) || publicUrl.username || publicUrl.password || publicUrl.pathname !== "/" || publicUrl.search || publicUrl.hash) {
 		throw new Error("publicOrigin must be an HTTP or HTTPS origin without credentials, path, query, or fragment.");
@@ -266,6 +267,8 @@ export function createRequestHandler(options: RequestHandlerOptions): (request: 
 		return json({ error: "Route not found." }, 404);
 	};
 }
+
+export function createRequestHandler(options: RequestHandlerOptions): (request: Request) => Promise<Response> { return secureHandler(applicationHandler(options)); }
 
 if (import.meta.main) {
 	const port = Number(process.env.PORT ?? "3000");
