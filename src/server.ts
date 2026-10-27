@@ -268,7 +268,7 @@ function applicationHandler(options: RequestHandlerOptions): (request: Request) 
 	};
 }
 
-export function createRequestHandler(options: RequestHandlerOptions): (request: Request) => Promise<Response> { return secureHandler(applicationHandler(options)); }
+export function createRequestHandler(options: RequestHandlerOptions): (request: Request) => Promise<Response> { return secureHandler(applicationHandler(options), { origin: options.publicOrigin }); }
 
 if (import.meta.main) {
 	const port = Number(process.env.PORT ?? "3000");
