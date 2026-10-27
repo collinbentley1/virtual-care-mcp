@@ -494,3 +494,7 @@ describe("HTTP request boundary", () => {
 		expect((await h.post("/api/visits/start", { scenarioId: "unknown" })).status).toBe(400);
 	});
 });
+
+test("datastore readiness fails closed without exposing storage details",async()=>{const h=await harness(undefined,{ready:async()=>{throw new Error("private storage details");}});expect((await h.handle(new Request(`${publicOrigin}/livez`))).status).toBe(200);const response=await h.handle(new Request(`${publicOrigin}/readyz`));expect(response.status).toBe(503);expect(await response.json()).toEqual({ok:false});});
+
+test("readiness coalesces public probes and retains HEAD representation length",async()=>{let calls=0;const h=await harness(undefined,{ready:async()=>{calls++;throw new Error("private details");}});const responses=await Promise.all(Array.from({length:20},()=>h.handle(new Request(`${publicOrigin}/readyz`))));expect(calls).toBe(1);expect(responses.every(response=>response.status===503)).toBe(true);const head=await h.handle(new Request(`${publicOrigin}/readyz`,{method:"HEAD"}));expect(head.status).toBe(503);expect(head.headers.get("Content-Length")).toBe(String(new TextEncoder().encode(JSON.stringify({ok:false})).byteLength));expect(await head.text()).toBe("");expect(calls).toBe(1);});

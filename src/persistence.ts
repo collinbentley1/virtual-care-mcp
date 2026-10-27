@@ -18,6 +18,7 @@ export const storedVisitSchema = z.object({
 export type StoredVisit = z.infer<typeof storedVisitSchema>;
 export type VisitMutation = { result: CareResult; next?: StoredVisit };
 export interface VisitStore {
+	ready(): Promise<void>;
 	create(record: StoredVisit): Promise<boolean>;
 	transact(id: VisitId, update: (current: StoredVisit | null) => VisitMutation): Promise<CareResult>;
 	close(): void;
@@ -42,6 +43,7 @@ export function createMemoryStore(): VisitStore {
 			if (change.next) visits.set(id, structuredClone(change.next));
 			return change.result;
 		},
+		async ready() {},
 		close() { visits.clear(); },
 	};
 }
@@ -83,6 +85,7 @@ export async function createSqliteStore(path: string): Promise<VisitStore> {
 			try { return transaction.immediate(id, update); }
 			catch { throw new StoreUnavailable(); }
 		},
+		async ready() { db.query("SELECT 1").get(); },
 		close() { db.close(); },
 	};
 }
@@ -173,6 +176,7 @@ export function createFirestoreStore(options: {
 			}
 			throw new StoreUnavailable();
 		},
+		async ready() {const response=await request(`${databaseName}/documents/${collection}?pageSize=1&mask.fieldPaths=expiresAt`);await response.body?.cancel();if(!response.ok)throw new StoreUnavailable();},
 		close() {},
 	};
 }
