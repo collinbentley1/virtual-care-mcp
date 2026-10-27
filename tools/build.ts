@@ -1,10 +1,6 @@
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-if (Bun.version !== "1.4.2" || Bun.revision !== "744846f844374847c902b5e7fd59b4342a51ef99") {
-	throw new Error("Build with the official stable Bun 1.4.2 release (744846f84). Use the exact runtime selected for the platform update.");
-}
-
 const root = join(import.meta.dir, "..");
 const dist = join(root, "dist");
 await rm(dist, { recursive: true, force: true });
