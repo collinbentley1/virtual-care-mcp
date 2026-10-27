@@ -494,3 +494,5 @@ describe("HTTP request boundary", () => {
 		expect((await h.post("/api/visits/start", { scenarioId: "unknown" })).status).toBe(400);
 	});
 });
+
+test("datastore readiness fails closed without exposing storage details",async()=>{const h=await harness(undefined,{ready:async()=>{throw new Error("private storage details");}});expect((await h.handle(new Request(`${publicOrigin}/livez`))).status).toBe(200);const response=await h.handle(new Request(`${publicOrigin}/readyz`));expect(response.status).toBe(503);expect(await response.json()).toEqual({ok:false});});

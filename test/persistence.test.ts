@@ -251,3 +251,5 @@ test("SQLite protects new and existing sidecars in an already traversable direct
 		await rm(directory, { recursive: true, force: true });
 	}
 });
+
+test("Firestore readiness requires successful database access",async()=>{let status=404;const store=createFirestoreStore({projectId:"demo-project",getToken:async()=>"synthetic",fetcher:async()=>Response.json({documents:[]},{status})});await expect(store.ready()).rejects.toThrow();status=403;await expect(store.ready()).rejects.toThrow();status=200;await expect(store.ready()).resolves.toBeUndefined();});

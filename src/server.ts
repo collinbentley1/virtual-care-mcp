@@ -23,6 +23,7 @@ export type RequestHandlerOptions = McpOptions & {
 	browserHtml?: string;
 	publicDirectory?: string;
 	deploymentNonce?: string;
+	ready?: () => Promise<void>;
 };
 
 type JsonRead =
@@ -123,6 +124,11 @@ function applicationHandler(options: RequestHandlerOptions): (request: Request) 
 				? { ok: true, deployment: options.deploymentNonce }
 				: { ok: true };
 			return request.method === "HEAD" ? new Response(null, { status: 200 }) : json(body);
+		}
+		if(url.pathname==="/readyz") {
+			if(request.method!=="GET" && request.method!=="HEAD") return methodNotAllowed("GET, HEAD");
+			let ok=true;try{await options.ready?.();}catch{ok=false;}
+			const response=json({ok},ok?200:503);return request.method==="HEAD"?new Response(null,{status:response.status,headers:response.headers}):response;
 		}
 		if (url.pathname === "/livekit.js" && publicDirectory) {
 			if (request.method !== "GET" && request.method !== "HEAD") return methodNotAllowed("GET, HEAD");
@@ -304,6 +310,7 @@ if (import.meta.main) {
 			media: media.join,
 			mediaConnectOrigins,
 			deploymentNonce: process.env.PLATFORM_DEPLOY_NONCE,
+			ready: () => store.ready(),
 		}),
 	});
 	process.stdout.write(`${JSON.stringify({ event: "server_started", port: server.port })}\n`);
