@@ -1,3 +1,4 @@
+import { cachedReadiness } from "../.platform/runtime/data.ts";
 import { secureHandler } from "../.platform/runtime/http.ts";
 import { resolve, sep } from "node:path";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -90,6 +91,7 @@ function methodNotAllowed(allow: string): Response {
 }
 
 function applicationHandler(options: RequestHandlerOptions): (request: Request) => Promise<Response> {
+	const ready = cachedReadiness(options.ready ?? (async()=>{}));
 	const publicUrl = new URL(options.publicOrigin);
 	if (!/^https?:$/.test(publicUrl.protocol) || publicUrl.username || publicUrl.password || publicUrl.pathname !== "/" || publicUrl.search || publicUrl.hash) {
 		throw new Error("publicOrigin must be an HTTP or HTTPS origin without credentials, path, query, or fragment.");
@@ -127,8 +129,8 @@ function applicationHandler(options: RequestHandlerOptions): (request: Request) 
 		}
 		if(url.pathname==="/readyz") {
 			if(request.method!=="GET" && request.method!=="HEAD") return methodNotAllowed("GET, HEAD");
-			let ok=true;try{await options.ready?.();}catch{ok=false;}
-			const response=json({ok},ok?200:503);return request.method==="HEAD"?new Response(null,{status:response.status,headers:response.headers}):response;
+			let ok=true;try{await ready();}catch{ok=false;}
+			const response=json({ok},ok?200:503);response.headers.set("Content-Length",String(new TextEncoder().encode(JSON.stringify({ok})).byteLength));return request.method==="HEAD"?new Response(null,{status:response.status,headers:response.headers}):response;
 		}
 		if (url.pathname === "/livekit.js" && publicDirectory) {
 			if (request.method !== "GET" && request.method !== "HEAD") return methodNotAllowed("GET, HEAD");
