@@ -1,21 +1,25 @@
-name: Application
+name: Bun verify
 
 on:
-  pull_request:
-    types:
-      - edited
-      - opened
-      - reopened
-      - synchronize
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        required: false
+        type: string
 
 permissions: {}
 
 jobs:
-  verify:
+  run:
     name: Bun verify
     permissions:
       contents: read
-    uses: collinbentley1/platform/.github/workflows/application.yml@dbf956f3f9c2bbad252e2899e198ecf25c1cb64f
+      pull-requests: read
+      checks: write
+    with:
+      pull_request: ${{ inputs.pull_request || '' }}
+      platform_sha: dc8d6c1a6f8c619ca9c19904d6448544324d8c6d
+    uses: collinbentley1/platform/.github/workflows/application-v1.yml@dc8d6c1a6f8c619ca9c19904d6448544324d8c6d
